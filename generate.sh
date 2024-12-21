@@ -1,26 +1,40 @@
 #!/bin/bash
 
-# FIle for all seeds
-seed_file=$HOME/.config/open-2fa/seeds
+# File for all seeds
+seed_file="${1:-$HOME/.config/open-2fa/seeds}"
 
-decode ()
-{
-  oathtool -b --totp $1
+decode() {
+  oathtool -b --totp "$1"
 }
 
-# Dmenu for selecting application/code_id
-chosen=$(cut -d ':' -f1 $seed_file | dmenu -i -l 30)
-
-# Copying seed for selected application
-seed=$(cat $seed_file | sed -n '/'$chosen'/p' | awk -F':' '{print $2}')
-
-# Decoding seed
-code=$(decode "$seed")
-
-# Copy code to clipboard and push notification
-if [ -n "$1" ]; then
-	xdotool type "$code"
+# Select menu program and clipboard tool
+if [ "$XDG_SESSION_TYPE" = "wayland" ]; then
+  program="wofi -d -L 10 -W 300 -p Select"
+  clipboard="wl-copy --type text/plain"
+  typer="wl-copy"
 else
-	echo "$code" | tr -d '\n' | xclip -selection clipboard
-	notify-send "'$code' copied to clipboard." &
+  program="dmenu -i -l 10"
+  clipboard="xclip -selection clipboard"
+  typer="xdotool type"
+fi
+
+# Verify seed file exists
+[ -f "$seed_file" ] || { echo "Seed file not found: $seed_file" >&2; exit 1; }
+
+# Select application
+chosen=$(cut -d ':' -f1 "$seed_file" | eval "$program")
+[ -n "$chosen" ] || exit 0
+
+# Retrieve and decode seed
+seed=$(awk -F':' -v app="$chosen" '$1 == app {print $2}' "$seed_file")
+[ -n "$seed" ] || { echo "Seed not found for: $chosen" >&2; exit 1; }
+code=$(decode "$seed")
+[ -n "$code" ] || { echo "Failed to generate code for: $chosen" >&2; exit 1; }
+
+# Output code
+if [ -n "$code" ]; then
+  echo -n "$code" | eval "$typer"
+else
+  echo -n "$code" | eval "$clipboard"
+  command -v notify-send >/dev/null && notify-send "$code copied to clipboard."
 fi
